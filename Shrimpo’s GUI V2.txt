@@ -1,4 +1,4 @@
--- Shrimpo's GUI v96 (All toggles off by default; Automation only in other game)
+-- Shrimpo's GUI v2
 -- Made by spinning Shrimpo | TikTok/YouTube/Root/Discord
 
 -- =============================================
@@ -216,6 +216,9 @@ local function notify(title, desc, duration)
     })
 end
 
+-- =============================================
+-- TABS (Automation only in other game; Teleports only in Dandy's World)
+-- =============================================
 local LocalPlayerTab = Window:Tab({ Title = "Local Player", Icon = "user" })
 local EnvironmentTab = Window:Tab({ Title = "Environment", Icon = "sun" })
 local VisualsTab = Window:Tab({ Title = "Visuals", Icon = "eye" })
@@ -224,13 +227,17 @@ local ScriptsTab = Window:Tab({ Title = "Scripts", Icon = "code" })
 local ClientSidedTab = Window:Tab({ Title = "Client Sided", Icon = "monitor" })
 local CreditsTab = Window:Tab({ Title = inDandysWorld and "Info" or "Credits", Icon = "star" })
 
--- Automation tab: only in the other game
+-- Automation tab: ONLY in the other game
 local AutomationTab = nil
 if not inDandysWorld then
     AutomationTab = Window:Tab({ Title = "Automation", Icon = "cpu" })
 end
 
-local TeleportsTab = Window:Tab({ Title = "Teleports", Icon = "map-pin" })
+-- Teleports tab: ONLY in Dandy's World
+local TeleportsTab = nil
+if inDandysWorld then
+    TeleportsTab = Window:Tab({ Title = "Teleports", Icon = "map-pin" })
+end
 
 -- =============================================
 -- LOCAL PLAYER TAB
@@ -753,220 +760,8 @@ EnvironmentTab:Button({
 })
 
 -- =============================================
--- VISUALS TAB
+-- VISUALS TAB (Stats Faker removed entirely)
 -- =============================================
-
--- STATS FAKER (default OFF)
-getgenv().statsfaker_enabled = false
-
-local statsFakerSetupDone = false
-local statsFakerTextBoxes = {}
-
-local function setupStatsFaker()
-    if statsFakerSetupDone then return end
-    statsFakerSetupDone = true
-
-    if getgenv().savestats == nil then
-        getgenv().savestats = true
-    end
-    if getgenv().makestatsprogress == nil then
-        getgenv().makestatsprogress = true
-    end
-
-    local httpservice = HttpService
-    local file = "DWstats"
-
-    local function sendnotif(title, text)
-        if StarterGui and StarterGui.SetCore then
-            pcall(function()
-                StarterGui:SetCore("SendNotification", {
-                    Title = title,
-                    Text = text,
-                    Duration = 5
-                })
-            end)
-        end
-    end
-
-    local function save(data)
-        if getgenv().savestats == true then
-            if writefile then
-                local success, err = pcall(function()
-                    writefile(file, httpservice:JSONEncode(data))
-                end)
-                if not success then
-                    sendnotif("executor", "writefile() failed: " .. tostring(err))
-                end
-            else
-                sendnotif("executor", "your executor does not have the writefile() function. faked stats won't save when you reload.")
-            end
-        end
-    end
-
-    local function load()
-        if getgenv().savestats == true then
-            if isfile and readfile then
-                local success, exists = pcall(function()
-                    return isfile(file)
-                end)
-                if success and exists then
-                    local success2, content = pcall(function()
-                        return readfile(file)
-                    end)
-                    if success2 then
-                        local success3, decoded = pcall(function()
-                            return httpservice:JSONDecode(content)
-                        end)
-                        if success3 then
-                            return decoded
-                        else
-                            sendnotif("executor", "jsondecode failed.")
-                        end
-                    else
-                        sendnotif("executor", "readfile() failed.")
-                    end
-                end
-            else
-                if not isfile then
-                    sendnotif("executor", "your executor does not have the isfile() function. faked stats won't save when you reload.")
-                end
-                if not readfile then
-                    sendnotif("executor", "your executor does not have the readfile() function. faked stats won't save when you reload.")
-                end
-            end
-        end
-        return {}
-    end
-
-    local saved = load()
-    local scroll = LocalPlayer:FindFirstChild("PlayerGui") and LocalPlayer.PlayerGui:FindFirstChild("MainGui") and LocalPlayer.PlayerGui.MainGui:FindFirstChild("StatFrame") and LocalPlayer.PlayerGui.MainGui.StatFrame:FindFirstChild("ScrollingFrame")
-
-    if not scroll then
-        warn("Stats frame not found – Stats Faker may not work.")
-        return
-    end
-
-    for i, frame in pairs(scroll:GetChildren()) do
-        if frame:IsA("TextButton") and frame:FindFirstChild("StatName") then
-            local stat = frame.StatName
-            local name = stat.Text:split(":")[1]
-
-            local updating = false
-
-            local function getnum()
-                return tonumber(stat.Text:match("%d+")) or 0
-            end
-
-            if getgenv().savestats == true and saved[name] then
-                local real = tonumber(saved[name].real) or getnum()
-                local fake = tonumber(saved[name].fake) or getnum()
-                local difference = fake - real
-                local newfake = getnum() + difference
-
-                updating = true
-                stat.Text = name .. ": " .. tostring(newfake)
-                updating = false
-
-                saved[name] = {
-                    real = getnum(),
-                    fake = newfake
-                }
-                save(saved)
-            end
-
-            local lastreal = tonumber(saved[name] and saved[name].real) or getnum()
-
-            if stat.GetPropertyChangedSignal then
-                stat:GetPropertyChangedSignal("Text"):Connect(function()
-                    if updating then return end
-                    if not getgenv().statsfaker_enabled then return end
-                    if getgenv().makestatsprogress ~= true then return end
-                    if not saved[name] then return end
-
-                    local current = getnum()
-                    if current == tonumber(saved[name].fake) then return end
-
-                    local gained = current - lastreal
-                    lastreal = current
-
-                    local newfake = (tonumber(saved[name].fake) or current) + gained
-
-                    saved[name] = {
-                        real = current,
-                        fake = newfake
-                    }
-
-                    updating = true
-                    stat.Text = name .. ": " .. tostring(newfake)
-                    updating = false
-                    save(saved)
-                end)
-            else
-                sendnotif("executor", "getpropertychangedsignal() does not exist.")
-            end
-
-            local textbox = Instance.new("TextBox")
-            textbox.Size = UDim2.new(1, 0, 1, 0)
-            textbox.BackgroundTransparency = 1
-            textbox.Font = Enum.Font.FredokaOne
-            textbox.TextColor3 = Color3.fromRGB(225, 225, 225)
-            textbox.Text = ""
-            textbox.PlaceholderText = ""
-            textbox.Parent = frame
-            textbox.TextStrokeTransparency = 0
-            textbox.TextSize = 32
-
-            table.insert(statsFakerTextBoxes, textbox)
-
-            textbox.FocusLost:Connect(function()
-                if not getgenv().statsfaker_enabled then return end
-                local num = textbox.Text:gsub("%D", "")
-                if num ~= "" then
-                    local currentreal = getnum()
-                    local tonumbernum = tonumber(num) or 0
-
-                    updating = true
-                    stat.Text = name .. ": " .. tostring(tonumbernum)
-                    updating = false
-
-                    if getgenv().savestats == true then
-                        if getgenv().makestatsprogress == true then
-                            saved[name] = {
-                                real = currentreal,
-                                fake = tonumbernum
-                            }
-                            lastreal = currentreal
-                        else
-                            saved[name] = {
-                                fake = tonumbernum
-                            }
-                        end
-                        save(saved)
-                    end
-                end
-                textbox.Text = ""
-            end)
-        end
-    end
-
-    sendnotif("Stats Faker", "Click any stat and type a number to fake it!")
-end
-
-task.spawn(setupStatsFaker)
-
-VisualsTab:Toggle({
-    Title = "Stats Faker",
-    Desc = "Fake your stats – click a stat and type a number",
-    Value = false,  -- default OFF
-    Callback = function(state)
-        getgenv().statsfaker_enabled = state
-        if state then
-            notify("Stats Faker", "Enabled. Click any stat to fake it.")
-        else
-            notify("Stats Faker", "Disabled. Stats will not be modified.")
-        end
-    end,
-})
 
 -- ANTI LAG
 local antiLagEnabled = false
@@ -1541,7 +1336,7 @@ for _, btn in ipairs(scriptButtons) do
 end
 
 -- =============================================
--- CLIENT SIDED TAB (CS User updated)
+-- CLIENT SIDED TAB (Title Faker only in Dandy's World)
 -- =============================================
 ClientSidedTab:Button({ Title = "Star Time Skins (Mains only)", Desc = "Loads Star Time client-sided skins", Callback = function() loadstring(game:HttpGet('https://raw.githubusercontent.com/Jsssiee/Dreamyyy/refs/heads/main/heydidyounotice1000-7'))() end })
 ClientSidedTab:Button({ Title = "CS Dandy", Desc = "Client-sided Dandy skin", Callback = function() loadstring(game:HttpGet("https://pastefy.app/ONZ1siGs/raw"))() end })
@@ -1565,16 +1360,21 @@ ClientSidedTab:Button({ Title = "CS User", Desc = "Changes your UserId, Name, Ch
 
     notify("CS User", "User info changed!")
 end })
-ClientSidedTab:Button({ Title = "Title Faker", Desc = "go in journal and press the freaky tree to begin", Callback = function()
-    getgenv().SCRIPT_KEY = "auth"
-    loadstring(game:HttpGet("https://api.jnkie.com/api/v1/luascripts/public/319eea422797aa013ae830afa7cf9003874f2659007fd8f99dbecd9d536a0f9b/download", true))()
-end })
+
+-- Title Faker: only in Dandy's World
+if inDandysWorld then
+    ClientSidedTab:Button({ Title = "Title Faker", Desc = "go in journal and press the freaky tree to begin", Callback = function()
+        getgenv().SCRIPT_KEY = "auth"
+        loadstring(game:HttpGet("https://api.jnkie.com/api/v1/luascripts/public/319eea422797aa013ae830afa7cf9003874f2659007fd8f99dbecd9d536a0f9b/download", true))()
+    end })
+end
+
 ClientSidedTab:Button({ Title = "Barnaby Deleter", Desc = "Removes Barnaby from your character", Callback = function() local p = game:GetService("Players").LocalPlayer; local b = p:FindFirstChild("Barnaby", true) or (p.Character and p.Character:FindFirstChild("Barnaby", true)); if b then b:Destroy() end end })
 
 -- =============================================
--- TELEPORTS TAB (Elevators only in Dandy's World)
+-- TELEPORTS TAB (only in Dandy's World)
 -- =============================================
-if inDandysWorld then
+if TeleportsTab then
     local function teleportToGate(gateName)
         local elevatorsFolder = Workspace:FindFirstChild("Elevators")
         if not elevatorsFolder then
