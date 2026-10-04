@@ -1,0 +1,1573 @@
+-- ==============================================================================
+-- 🎈 IMS/Shrimpo's GUI 🎈 — Obsidian Edition
+-- Part 2 auto-executes 2 seconds after Part 1.
+-- ==============================================================================
+local Library = loadstring(game:HttpGet('https://raw.githubusercontent.com/deividcomsono/Obsidian/refs/heads/main/Library.lua'))()
+
+local Window = Library:CreateWindow({
+    Title = "IMS/Shrimpo's GUI",
+    Footer = "BOIIIIIIIIIIIIIIIIIIIIIIIIIIIII",
+    NotifySide = "Right",
+    Resizable = true,
+    Center = true,
+    AutoShow = true,
+    Font = Enum.Font.Code,
+    ToggleKeybind = Enum.KeyCode.RightControl,
+})
+
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local Lighting = game:GetService("Lighting")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local UserInputService = game:GetService("UserInputService")
+local Workspace = game:GetService("Workspace")
+local LocalPlayer = Players.LocalPlayer
+local Camera = workspace.CurrentCamera
+
+-- Shared state
+local Shared = {
+    Library = Library, Window = Window, LocalPlayer = LocalPlayer, Camera = Camera,
+    speedValue = 16, Character = nil, HumanoidRootPart = nil, Humanoid = nil,
+}
+getgenv().IMS_ShrimpoGUI = Shared
+
+local function OnCharacter(char)
+    Shared.Character = char
+    Shared.HumanoidRootPart = char:WaitForChild("HumanoidRootPart", 5)
+    Shared.Humanoid = char:WaitForChild("Humanoid", 5)
+end
+LocalPlayer.CharacterAdded:Connect(OnCharacter)
+if LocalPlayer.Character then
+    Shared.Character = LocalPlayer.Character
+    Shared.HumanoidRootPart = Shared.Character:FindFirstChild("HumanoidRootPart")
+    Shared.Humanoid = Shared.Character:FindFirstChildOfClass("Humanoid")
+end
+
+local function teleportTo(name, isExact)
+    local Character, HumanoidRootPart = Shared.Character, Shared.HumanoidRootPart
+    if not Character or not HumanoidRootPart then return end
+    for _, obj in ipairs(workspace:GetDescendants()) do
+        local match = isExact and (obj.Name == name) or obj.Name:lower():find(name:lower())
+        if match then
+            local part = obj:IsA("Model") and (obj.PrimaryPart or obj:FindFirstChildWhichIsA("BasePart", true)) or (obj:IsA("BasePart") and obj)
+            if part then
+                HumanoidRootPart.CFrame = (part:IsA("Model") and part:GetPivot() or part.CFrame) + Vector3.new(0, 3, 0)
+                return true
+            end
+        end
+    end
+    return false
+end
+Shared.teleportTo = teleportTo
+
+-- Noclip
+local NoclipConnection = nil
+local function toggleNoclip(state)
+    if state then
+        local function applyNoclip()
+            local character = LocalPlayer.Character or LocalPlayer.CharacterAdded:Wait()
+            for _, part in ipairs(character:GetDescendants()) do
+                if part:IsA("BasePart") then
+                    pcall(function()
+                        for _, conn in ipairs(getconnections(part:GetPropertyChangedSignal("CanQuery"))) do conn:Disconnect() end
+                        for _, conn in ipairs(getconnections(part:GetPropertyChangedSignal("CanCollide"))) do conn:Disconnect() end
+                        for _, conn in ipairs(getconnections(part:GetPropertyChangedSignal("CanTouch"))) do conn:Disconnect() end
+                        for _, conn in ipairs(getconnections(part.Changed)) do conn:Disconnect() end
+                    end)
+                    part.CanCollide = false
+                end
+            end
+        end
+        applyNoclip()
+        if not NoclipConnection then
+            NoclipConnection = RunService.Stepped:Connect(function()
+                local character = LocalPlayer.Character
+                if character then
+                    for _, part in ipairs(character:GetDescendants()) do
+                        if part:IsA("BasePart") then part.CanCollide = false end
+                    end
+                end
+            end)
+        end
+    else
+        if NoclipConnection then NoclipConnection:Disconnect(); NoclipConnection = nil end
+        local character = LocalPlayer.Character
+        if character then
+            for _, part in ipairs(character:GetDescendants()) do
+                if part:IsA("BasePart") then part.CanCollide = true end
+            end
+        end
+    end
+end
+
+-- ==============================================================================
+-- MAIN TAB
+-- ==============================================================================
+local MainTab = Window:AddTab({ Name = "Main", Icon = "house", Description = "Player movement & basics" })
+local tpWalkEnabled, tpWalkSpeed = false, 1
+local floatEnabled, floatHeight, lockedFloatY, floatConnection = false, 3.5, nil, nil
+
+local MovementGroup = MainTab:AddLeftGroupbox("Movement")
+MovementGroup:AddSlider("SpeedSlider", {
+    Text = "Speed", Default = 16, Min = 16, Max = 200, Rounding = 0,
+    Callback = function(v) Shared.speedValue = v end
+})
+MovementGroup:AddToggle("NoclipToggle", {
+    Text = "Noclip", Default = false,
+    Callback = function(v) toggleNoclip(v) end
+})
+
+local TpWalkGroup = MainTab:AddRightGroupbox("TP Walk & Float")
+TpWalkGroup:AddToggle("TPWalkToggle", {
+    Text = "Enable Tpwalk", Default = false,
+    Callback = function(v) tpWalkEnabled = v end
+})
+TpWalkGroup:AddSlider("TPWalkSpeed", {
+    Text = "Tpwalk Speed", Default = 1, Min = 0.1, Max = 5, Rounding = 1,
+    Callback = function(v) tpWalkSpeed = v end
+})
+TpWalkGroup:AddToggle("FloatToggle", {
+    Text = "Float", Default = false,
+    Callback = function(v)
+        floatEnabled = v
+        local HumanoidRootPart = Shared.HumanoidRootPart
+        if floatEnabled then
+            if HumanoidRootPart then
+                local rp = RaycastParams.new()
+                rp.FilterDescendantsInstances = {Shared.Character}
+                rp.FilterType = Enum.RaycastFilterType.Exclude
+                local rr = workspace:Raycast(HumanoidRootPart.Position, Vector3.new(0, -1000, 0), rp)
+                lockedFloatY = rr and (rr.Position.Y + floatHeight) or HumanoidRootPart.Position.Y
+            end
+            floatConnection = RunService.RenderStepped:Connect(function()
+                local c, r = Shared.Character, Shared.HumanoidRootPart
+                if c and r and lockedFloatY then
+                    r.CFrame = CFrame.new(r.Position.X, lockedFloatY, r.Position.Z) * (r.CFrame - r.Position)
+                    r.AssemblyLinearVelocity = Vector3.new(r.AssemblyLinearVelocity.X, 0, r.AssemblyLinearVelocity.Z)
+                end
+            end)
+        else
+            if floatConnection then floatConnection:Disconnect(); floatConnection = nil end
+            lockedFloatY = nil
+        end
+    end
+})
+TpWalkGroup:AddSlider("FloatHeightSlider", {
+    Text = "Float Studs", Default = 3.5, Min = 1, Max = 20, Rounding = 1,
+    Callback = function(v)
+        floatHeight = v
+        local HumanoidRootPart = Shared.HumanoidRootPart
+        if floatEnabled and HumanoidRootPart then
+            local rp = RaycastParams.new()
+            rp.FilterDescendantsInstances = {Shared.Character}
+            rp.FilterType = Enum.RaycastFilterType.Exclude
+            local rr = workspace:Raycast(HumanoidRootPart.Position, Vector3.new(0, -1000, 0), rp)
+            if rr then lockedFloatY = rr.Position.Y + floatHeight end
+        end
+    end
+})
+
+local MiscGroup = MainTab:AddRightGroupbox("Misc")
+MiscGroup:AddButton({ Text = "Fly", Func = function()
+    pcall(function() loadstring(game:HttpGet("https://rawscripts.net/raw/Universal-Script-The-best-fly-gui-246203"))() end)
+end })
+MiscGroup:AddButton({ Text = "Destroy Gui", Func = function()
+    toggleNoclip(false)
+    getgenv().IMS_ShrimpoGUI = nil
+    Library:Unload()
+end })
+
+RunService.RenderStepped:Connect(function(delta)
+    if Shared.Humanoid and Shared.Humanoid.Parent and Shared.speedValue > 16 then
+        pcall(function() Shared.Humanoid.WalkSpeed = Shared.speedValue end)
+    end
+    if tpWalkEnabled and Shared.Character and Shared.HumanoidRootPart and Shared.Humanoid and Shared.Humanoid.MoveDirection.Magnitude > 0 then
+        pcall(function()
+            Shared.HumanoidRootPart.CFrame = Shared.HumanoidRootPart.CFrame + (Shared.Humanoid.MoveDirection * tpWalkSpeed * delta * 60)
+        end)
+    end
+end)
+
+-- ==============================================================================
+-- AUTOMATION TAB
+-- ==============================================================================
+local AutomationTab = Window:AddTab({ Name = "Automation", Icon = "cpu", Description = "Auto farm & collect" })
+
+local autoGetToElevatorEnabled = false
+local autoCollectActive = false
+local autoCollectEventActive = false
+
+local CollectGroup = AutomationTab:AddLeftGroupbox("Collecting")
+CollectGroup:AddToggle("AutoGetToElevatorToggle", {
+    Text = "Auto Get To Elevator", Default = false,
+    Callback = function(v) autoGetToElevatorEnabled = v end
+})
+CollectGroup:AddToggle("AutoCollectResearchCapsulesToggle", {
+    Text = "Auto Collect Research Capsules", Default = false,
+    Callback = function(v)
+        autoCollectActive = v
+        if autoCollectActive then
+            task.spawn(function()
+                if not Shared.Character or not Shared.HumanoidRootPart then return end
+                while autoCollectActive do
+                    local capsules = {}
+                    for _, obj in ipairs(Workspace:GetDescendants()) do
+                        if obj.Name == "ResearchCapsule" then
+                            local tp = obj:IsA("BasePart") and obj or obj:FindFirstChildWhichIsA("BasePart", true)
+                            local pr = obj:FindFirstChildWhichIsA("ProximityPrompt", true)
+                            if tp and pr then table.insert(capsules, {Part = tp, Prompt = pr}) end
+                        end
+                    end
+                    if #capsules > 0 then
+                        local orig = Shared.HumanoidRootPart.CFrame
+                        local any = false
+                        for _, cap in ipairs(capsules) do
+                            if not autoCollectActive then break end
+                            any = true
+                            Shared.HumanoidRootPart.CFrame = cap.Part.CFrame + Vector3.new(0, 3, 0)
+                            task.wait(0.3)
+                            pcall(function() fireproximityprompt(cap.Prompt) end)
+                            task.wait(0.4)
+                        end
+                        if any and Shared.HumanoidRootPart then Shared.HumanoidRootPart.CFrame = orig end
+                    end
+                    task.wait(1)
+                end
+            end)
+        end
+    end
+})
+CollectGroup:AddToggle("AutoCollectEventCurrencyToggle", {
+    Text = "Auto Collect Event Currency", Default = false,
+    Callback = function(v)
+        autoCollectEventActive = v
+        if autoCollectEventActive then
+            task.spawn(function()
+                if not Shared.Character or not Shared.HumanoidRootPart then return end
+                while autoCollectEventActive do
+                    local items = {}
+                    for _, obj in ipairs(Workspace:GetDescendants()) do
+                        if obj.Name == "Pumpkin" then
+                            local tp = obj:IsA("BasePart") and obj or obj:FindFirstChildWhichIsA("BasePart", true)
+                            local pr = obj:FindFirstChildWhichIsA("ProximityPrompt", true)
+                            if tp and pr then table.insert(items, {Part = tp, Prompt = pr}) end
+                        end
+                    end
+                    if #items > 0 then
+                        local orig = Shared.HumanoidRootPart.CFrame
+                        local any = false
+                        for _, item in ipairs(items) do
+                            if not autoCollectEventActive then break end
+                            any = true
+                            Shared.HumanoidRootPart.CFrame = item.Part.CFrame + Vector3.new(0, 3, 0)
+                            task.wait(0.3)
+                            pcall(function() fireproximityprompt(item.Prompt) end)
+                            task.wait(0.4)
+                        end
+                        if any and Shared.HumanoidRootPart then Shared.HumanoidRootPart.CFrame = orig end
+                    end
+                    task.wait(1)
+                end
+            end)
+        end
+    end
+})
+
+-- Auto Get To Elevator loop
+task.spawn(function()
+    while true do
+        task.wait(0.1)
+        if autoGetToElevatorEnabled then
+            pcall(function()
+                local infoFolder = Workspace:FindFirstChild("Info")
+                local panicValue = infoFolder and infoFolder:FindFirstChild("Panic")
+                local elevatorsFolder = Workspace:FindFirstChild("Elevators")
+                if panicValue and panicValue.Value == true and elevatorsFolder and Shared.HumanoidRootPart then
+                    local elevator = elevatorsFolder:FindFirstChild("Elevator") or elevatorsFolder:FindFirstChildOfClass("Model")
+                    if elevator then
+                        local tp = elevator.PrimaryPart or elevator:FindFirstChild("Hitbox") or elevator:FindFirstChildWhichIsA("BasePart")
+                        if tp then Shared.HumanoidRootPart.CFrame = tp.CFrame + Vector3.new(0, 3, 0) end
+                    end
+                end
+            end)
+        end
+    end
+end)
+
+local FarmGroup = AutomationTab:AddRightGroupbox("Farming")
+FarmGroup:AddButton({ Text = "Autofarm", Func = function()
+    pcall(function() loadstring(game:HttpGet("https://raw.githubusercontent.com/seannstar/voidextractor/refs/heads/main/VoidExtractor.lua"))() end)
+end })
+FarmGroup:AddButton({ Text = "Alternative Autofarm (Incase the other one doesn't work)", Func = function()
+    pcall(function() loadstring(game:HttpGet("https://raw.githubusercontent.com/BluuGuy-Sure/BluuHead-Dandy-s-World/refs/heads/main/JustThisOnce.lua"))() end)
+end })
+
+local autoUseItemsEnabled = false
+FarmGroup:AddToggle("AutoUseItemsToggle", {
+    Text = "Auto Use Itens", Default = false,
+    Callback = function(v) autoUseItemsEnabled = v end
+})
+task.spawn(function()
+    while true do
+        if autoUseItemsEnabled then
+            pcall(function()
+                local char = LocalPlayer.Character
+                if char and char:FindFirstChild("Inventory") then
+                    local inv = char.Inventory
+                    for i = 1, 3 do
+                        local slot = inv:FindFirstChild("Slot" .. tostring(i))
+                        if slot then ReplicatedStorage.Events.ItemEvent:InvokeServer(char, slot) end
+                    end
+                end
+            end)
+        end
+        task.wait(0.8)
+    end
+end)
+
+local autoAbilityEnabled = false
+FarmGroup:AddToggle("AutoAbilityToggle", {
+    Text = "Auto Use Ability", Default = false,
+    Callback = function(v) autoAbilityEnabled = v end
+})
+task.spawn(function()
+    while true do
+        if autoAbilityEnabled then
+            pcall(function()
+                if Shared.Character and Shared.HumanoidRootPart then
+                    ReplicatedStorage.Events.AbilityEvent:InvokeServer(Shared.Character, Shared.HumanoidRootPart.CFrame, false)
+                end
+            end)
+        end
+        task.wait(1.5)
+    end
+end)
+
+local autoSquirmEnabled = false
+FarmGroup:AddToggle("AutoEscapeSquirmToggle", {
+    Text = "Auto Escape Squirm", Default = false,
+    Callback = function(v) autoSquirmEnabled = v end
+})
+task.spawn(function()
+    pcall(function()
+        local remote = ReplicatedStorage:WaitForChild("Events"):WaitForChild("TwistedSquirmGrab")
+        local running = false
+        local dir = "left"
+        remote.OnClientEvent:Connect(function(action)
+            if autoSquirmEnabled then
+                if action == "GrabStart" then running = true
+                elseif action == "GrabEnd" then running = false end
+            else running = false end
+        end)
+        while true do
+            task.wait(0.1)
+            if autoSquirmEnabled and running then
+                if dir == "left" then remote:FireServer("Struggle", "left"); dir = "right"
+                else remote:FireServer("Struggle", "right"); dir = "left" end
+            end
+        end
+    end)
+end)
+
+-- ==============================================================================
+-- ESP TAB
+-- ==============================================================================
+local EspTab = Window:AddTab({ Name = "Esp", Icon = "eye", Description = "Visual ESP overlays" })
+
+-- ========== TWISTED ESP ==========
+local twistedEspEnabled = false
+local twistedDisableNametags = false
+local activeTwistedMonsters = {}
+local twistedConnection = nil
+
+local TwistedGroup = EspTab:AddLeftGroupbox("Twisteds ESP")
+TwistedGroup:AddToggle("TwistedEspToggle", {
+    Text = "Twisted Esp", Default = false,
+    Callback = function(v)
+        twistedEspEnabled = v
+        local ColorChangingList = { ["GourdyMonster"]=true,["BassieMonster"]=true,["BobetteMonster"]=true,["VeeMonster"]=true,["DyleMonster"]=true,["DandyMonster"]=true,["AstroMonster"]=true,["PebbleMonster"]=true,["ShellyMonster"]=true,["SproutMonster"]=true }
+        local Colors = { Color3.fromRGB(148,0,211),Color3.fromRGB(255,0,0),Color3.fromRGB(255,255,0),Color3.fromRGB(0,255,0),Color3.fromRGB(255,165,0),Color3.fromRGB(0,0,255) }
+        local CommonList = { ["BoxtenMonster"]=true,["PoppyMonster"]=true,["BrushaMonster"]=true,["ShrimpoMonster"]=true,["RudieMonster"]=true,["EggsonMonster"]=true,["RibeccaMonster"]=true,["YattaMonster"]=true,["TishaMonster"]=true,["LooeyMonster"]=true,["CosmoMonster"]=true }
+        local UncommonList = { ["FinnMonster"]=true,["TeaganMonster"]=true,["RodgerMonster"]=true,["RazzleDazzleMonster"]=true,["SoulvesterMonster"]=true,["GingerMonster"]=true,["FlyteMonster"]=true,["ConnieMonster"]=true,["BrightneyMonster"]=true,["ToodlesMonster"]=true }
+        local RareList = { ["GigiMonster"]=true,["ScrapsMonster"]=true,["GoobMonster"]=true,["WaxwellMonster"]=true,["GlistenMonster"]=true,["FlutterMonster"]=true,["EclipseMonster"]=true,["CocoaMonster"]=true,["CoalMonster"]=true,["SquirmMonster"]=true,["BlottMonster"]=true }
+        local BlotHandsList = { ["BlotHand"]=true, ["BlotHand_L"]=true, ["BlotHand_R"]=true }
+        local MainList = { ["ShellyMonster"]=true,["AstroMonster"]=true,["PebbleMonster"]=true,["VeeMonster"]=true,["SproutMonster"]=true,["BassieMonster"]=true,["BobetteMonster"]=true,["GourdyMonster"]=true }
+        local LethalList = { ["DandyMonster"]=true, ["DyleMonster"]=true }
+        local EasterEventList = { ["CocoaMonster"]=true,["BassieMonster"]=true,["FlyteMonster"]=true,["EggsonMonster"]=true }
+        local EasterColors = {Color3.fromRGB(255,255,153), Color3.fromRGB(255,153,204)}
+        local HalloweenEventList = { ["GourdyMonster"]=true,["EclipseMonster"]=true,["SoulvesterMonster"]=true,["RibeccaMonster"]=true }
+        local HalloweenColors = {Color3.fromRGB(148,0,211), Color3.fromRGB(255,128,0)}
+        local XmasEventList = { ["BobetteMonster"]=true,["CoalMonster"]=true,["GingerMonster"]=true,["RudieMonster"]=true }
+        local XmasColors = {Color3.fromRGB(0,204,153), Color3.fromRGB(255,51,51)}
+        local LethalColors = {Color3.fromRGB(255,0,0), Color3.fromRGB(0,0,0)}
+
+        local AllMonsters = {}
+        for k in pairs(CommonList) do AllMonsters[k]=true end
+        for k in pairs(UncommonList) do AllMonsters[k]=true end
+        for k in pairs(RareList) do AllMonsters[k]=true end
+        for k in pairs(BlotHandsList) do AllMonsters[k]=true end
+        for k in pairs(ColorChangingList) do AllMonsters[k]=true end
+        for k in pairs(LethalList) do AllMonsters[k]=true end
+
+        local function setupMonster(model)
+            if not model or not model:IsA("Model") or model:FindFirstChild("ESP_Container") then return end
+            local head = model:FindFirstChild("Head") or model:FindFirstChild("HumanoidRootPart")
+            if not head then return end
+
+            local container = Instance.new("Folder", model); container.Name = "ESP_Container"
+            local highlight = Instance.new("Highlight")
+            highlight.Adornee = model; highlight.FillTransparency = 0.5
+            highlight.OutlineTransparency = 0; highlight.OutlineColor = Color3.fromRGB(255,255,255)
+            highlight.Parent = container
+
+            local billboard = Instance.new("BillboardGui", head)
+            billboard.Name = "Nametag"; billboard.Size = UDim2.new(0,180,0,35)
+            billboard.StudsOffset = Vector3.new(0,4.2,0); billboard.AlwaysOnTop = true
+            billboard.Enabled = not twistedDisableNametags
+
+            local textLabel = Instance.new("TextLabel", billboard)
+            textLabel.Size = UDim2.new(1,0,1,0); textLabel.BackgroundTransparency = 1
+            textLabel.Font = Enum.Font.FredokaOne; textLabel.TextSize = 12
+            textLabel.TextStrokeTransparency = 0; textLabel.TextStrokeColor3 = Color3.fromRGB(0,0,0)
+
+            local rarityText = ""; local baseTextColor = Color3.fromRGB(255,0,0)
+            if CommonList[model.Name] then rarityText = " | Common"; baseTextColor = Color3.fromRGB(180,180,180)
+            elseif UncommonList[model.Name] then rarityText = " | Uncommon"; baseTextColor = Color3.fromRGB(50,255,50)
+            elseif RareList[model.Name] then rarityText = " | Rare"; baseTextColor = Color3.fromRGB(100,200,255)
+            elseif BlotHandsList[model.Name] then rarityText = ""; baseTextColor = Color3.fromRGB(100,200,255)
+            elseif MainList[model.Name] then rarityText = " | Main" end
+            if LethalList[model.Name] then rarityText = " | Lethal" end
+
+            table.insert(activeTwistedMonsters, billboard)
+            task.spawn(function()
+                local alpha = 0; local transitionTime = 1.0; local colorIndex = 1
+                while twistedEspEnabled and model and highlight and highlight.Parent and head do
+                    local dt = task.wait(0.1)
+                    alpha = alpha + (dt / transitionTime)
+                    if alpha >= 1 then alpha = 0; colorIndex = colorIndex % #Colors + 1 end
+                    if Shared.HumanoidRootPart then
+                        local displayName = model.Name:gsub("Monster","")
+                        if BlotHandsList[model.Name] then displayName = "BlotHand" end
+                        local targetColor = baseTextColor
+                        textLabel.Text = displayName .. rarityText
+                        local p = math.abs((tick() % 2) - 1)
+                        if LethalList[model.Name] then targetColor = LethalColors[1]:Lerp(LethalColors[2], p)
+                        elseif EasterEventList[model.Name] then targetColor = EasterColors[1]:Lerp(EasterColors[2], p)
+                        elseif HalloweenEventList[model.Name] then targetColor = HalloweenColors[1]:Lerp(HalloweenColors[2], p)
+                        elseif XmasEventList[model.Name] then targetColor = XmasColors[1]:Lerp(XmasColors[2], p)
+                        elseif ColorChangingList[model.Name] then
+                            targetColor = Colors[colorIndex]:Lerp(Colors[colorIndex % #Colors + 1], alpha)
+                        end
+                        highlight.FillColor = targetColor
+                        textLabel.TextColor3 = targetColor
+                    end
+                end
+            end)
+        end
+
+        if twistedEspEnabled then
+            for _, obj in pairs(Workspace:GetDescendants()) do
+                if obj:IsA("Model") and AllMonsters[obj.Name] then setupMonster(obj) end
+            end
+            if twistedConnection then twistedConnection:Disconnect() end
+            twistedConnection = Workspace.DescendantAdded:Connect(function(obj)
+                if twistedEspEnabled and obj:IsA("Model") and AllMonsters[obj.Name] then
+                    task.wait(0.1); setupMonster(obj)
+                end
+            end)
+        else
+            if twistedConnection then twistedConnection:Disconnect(); twistedConnection = nil end
+            for _, c in ipairs(activeTwistedMonsters) do if c and c.Parent then c:Destroy() end end
+            activeTwistedMonsters = {}
+            for _, obj in pairs(Workspace:GetDescendants()) do
+                if obj.Name == "ESP_Container" then obj:Destroy()
+                elseif obj.Name == "Nametag" and obj.Parent and obj.Parent:IsA("BasePart") then obj:Destroy() end
+            end
+        end
+    end
+})
+TwistedGroup:AddToggle("TwistedDisableNametagsToggle", {
+    Text = "Disable Twisted Esp Nametags", Default = false,
+    Callback = function(v)
+        twistedDisableNametags = v
+        for _, tag in ipairs(activeTwistedMonsters) do
+            if tag and tag.Parent then tag.Enabled = not twistedDisableNametags end
+        end
+    end
+})
+
+-- ========== PLAYER ESP ==========
+local playerEspEnabled = false
+local playerDisableNametags = false
+local activePlayerNametags = {}
+
+local PlayerEspGroup = EspTab:AddRightGroupbox("Player ESP")
+PlayerEspGroup:AddToggle("PlayerEspToggle", {
+    Text = "Player Esp", Default = false,
+    Callback = function(v)
+        playerEspEnabled = v
+        local CN_BLUE, CL_BLUE, CC_BLUE = Color3.fromRGB(0,50,150), Color3.fromRGB(0,30,100), Color3.fromRGB(0,15,60)
+        local CN_GREEN, CL_GREEN, CC_GREEN = Color3.fromRGB(0,255,0), Color3.fromRGB(0,180,0), Color3.fromRGB(0,100,0)
+
+        local function setupESP(player)
+            if player == LocalPlayer then return end
+            local function setupCharacter(char)
+                if not char then return end
+                local hrp = char:WaitForChild("HumanoidRootPart", 5)
+                local hum = char:WaitForChild("Humanoid", 5)
+                local head = char:WaitForChild("Head", 5)
+                if not hrp or not hum or not head then return end
+                if char:FindFirstChild("CustomChams") then char.CustomChams:Destroy() end
+                if char:FindFirstChild("CustomNametag") then char.CustomNametag:Destroy() end
+                if not playerEspEnabled then return end
+
+                local hl = Instance.new("Highlight", char)
+                hl.Name = "CustomChams"; hl.Adornee = char
+                hl.FillTransparency = 0.5; hl.OutlineTransparency = 0
+
+                local bb = Instance.new("BillboardGui", char)
+                bb.Name = "CustomNametag"; bb.Adornee = head
+                bb.Size = UDim2.new(0,200,0,50); bb.StudsOffset = Vector3.new(0,2.5,0)
+                bb.AlwaysOnTop = true; bb.Enabled = not playerDisableNametags
+                table.insert(activePlayerNametags, bb)
+
+                local layout = Instance.new("UIListLayout", bb)
+                layout.HorizontalAlignment = Enum.HorizontalAlignment.Center
+                layout.VerticalAlignment = Enum.VerticalAlignment.Center
+                layout.SortOrder = Enum.SortOrder.LayoutOrder
+
+                local nl = Instance.new("TextLabel", bb)
+                nl.Name = "NickLabel"; nl.Size = UDim2.new(1,0,0,25); nl.BackgroundTransparency = 1
+                nl.Text = player.Name; nl.TextColor3 = Color3.fromRGB(255,255,255)
+                nl.TextSize = 14; nl.Font = Enum.Font.FredokaOne; nl.TextStrokeTransparency = 0.5
+
+                local hlbl = Instance.new("TextLabel", bb)
+                hlbl.Name = "HealthLabel"; hlbl.Size = UDim2.new(1,0,0,25)
+                hlbl.BackgroundTransparency = 1; hlbl.TextSize = 14
+                hlbl.Font = Enum.Font.FredokaOne; hlbl.TextStrokeTransparency = 0.5
+
+                local conn
+                conn = RunService.RenderStepped:Connect(function()
+                    if not playerEspEnabled or not char or not char.Parent or not hum or hum.Health <= 0 then
+                        if hl then hl:Destroy() end
+                        if bb then bb:Destroy() end
+                        if conn then conn:Disconnect() end
+                        return
+                    end
+                    local hp = math.floor(hum.Health)
+                    hlbl.Text = "Health: " .. hp
+                    if hp == 1 then hl.FillColor = CC_BLUE; hl.OutlineColor = CC_BLUE; hlbl.TextColor3 = CC_GREEN
+                    elseif hp <= 2 then hl.FillColor = CL_BLUE; hl.OutlineColor = CL_BLUE; hlbl.TextColor3 = CL_GREEN
+                    else hl.FillColor = CN_BLUE; hl.OutlineColor = CN_BLUE; hlbl.TextColor3 = CN_GREEN end
+                end)
+            end
+            if player.Character then setupCharacter(player.Character) end
+            player.CharacterAdded:Connect(setupCharacter)
+        end
+
+        if playerEspEnabled then
+            for _, p in ipairs(Players:GetPlayers()) do setupESP(p) end
+        else
+            activePlayerNametags = {}
+            for _, p in ipairs(Players:GetPlayers()) do
+                if p.Character then
+                    if p.Character:FindFirstChild("CustomChams") then p.Character.CustomChams:Destroy() end
+                    if p.Character:FindFirstChild("CustomNametag") then p.Character.CustomNametag:Destroy() end
+                end
+            end
+        end
+    end
+})
+PlayerEspGroup:AddToggle("PlayerDisableNametagsToggle", {
+    Text = "Disable Player Esp Nametags", Default = false,
+    Callback = function(v)
+        playerDisableNametags = v
+        for _, tag in ipairs(activePlayerNametags) do
+            if tag and tag.Parent then tag.Enabled = not playerDisableNametags end
+        end
+    end
+})
+
+-- ========== ITEM ESP ==========
+local itemEspEnabled = false
+local itemDisableNametags = false
+local activeItemNametags = {}
+
+local ItemEspGroup = EspTab:AddLeftGroupbox("Item ESP")
+ItemEspGroup:AddToggle("ItemEspToggle", {
+    Text = "Item Esp", Default = false,
+    Callback = function(v)
+        itemEspEnabled = v
+        if itemEspEnabled then
+            local itemMap = {
+                AirHorn="Air Horn",SmokeBomb="Smoke Bomb",ResearchCapsule="Research Capsule",ProteinBar="Protein Bar",
+                Jawbreaker="Jawbreaker",EjectButton="Eject Button",HealthKit="MedKit",Bandage="Bandage",Tape="Tape",
+                Instructions="Instructions",ExtractionSpeedCandy="Extraction Candy",SkillCheckCandy="SkillCheck Candy",
+                StaminaCandy="Stamina Candy",StealthCandy="Stealth Candy",SpeedCandy="Speed Candy",Gumball="Gumball",
+                BonBon="BonBon",Chocolate="Chocolate",ChocolateBox="Chocolate Box",Pop="Pop",PopBottle="Pop Bottle",
+                JumperCable="Jumper Cable",Stopwatch="Stopwatch",ChristmasCookie="Christmas Cookie",
+                DandyEasterEggs="Dandy Easter Eggs",Pumpkin="Pumpkins",FakeCapsule="Fake Capsule",
+                CollectablePiece="Halloween Card",TrickOrTreatDoor_Origin="Halloween Door",
+                Ornament="Ornament",Basket="Basket",DandyCorn="DandyCorn"
+            }
+            local cols = {
+                ["Air Horn"]=Color3.fromRGB(255,50,50),["Smoke Bomb"]=Color3.fromRGB(135,206,250),
+                ["Research Capsule"]=Color3.fromRGB(0,255,0),["Protein Bar"]=Color3.fromRGB(0,100,0),
+                ["Jawbreaker"]=Color3.fromRGB(148,0,211),["Eject Button"]=Color3.fromRGB(255,255,0),
+                ["MedKit"]=Color3.fromRGB(255,0,127),["Bandage"]=Color3.fromRGB(255,20,147),
+                ["Tape"]=Color3.fromRGB(128,128,128),["Instructions"]=Color3.fromRGB(148,0,211),
+                ["Extraction Candy"]=Color3.fromRGB(148,0,211),["Skill Check Candy"]=Color3.fromRGB(255,140,0),
+                ["Stamina Candy"]=Color3.fromRGB(0,100,0),["Stealth Candy"]=Color3.fromRGB(135,206,250),
+                ["Speed Candy"]=Color3.fromRGB(255,255,0),["Gumball"]=Color3.fromRGB(135,206,250),
+                ["Bon Bon"]=Color3.fromRGB(255,182,193),["Chocolate"]=Color3.fromRGB(255,255,0),
+                ["Chocolate Box"]=Color3.fromRGB(255,255,0),["Pop"]=Color3.fromRGB(255,0,0),
+                ["Pop Bottle"]=Color3.fromRGB(255,0,0),["Jumper Cable"]=Color3.fromRGB(148,0,211),
+                ["Stopwatch"]=Color3.fromRGB(255,255,255),["Christmas Cookie"]=Color3.fromRGB(255,255,0),
+                ["Dandy Easter Eggs"]=Color3.fromRGB(255,255,0),["Pumpkins"]=Color3.fromRGB(255,140,0),
+                ["Fake Capsule"]=Color3.fromRGB(255,255,0),["Halloween Card"]=Color3.fromRGB(255,140,0),
+                ["DandyCorn"]=Color3.fromRGB(255,255,0)
+            }
+            local function apply(obj)
+                if not obj or not obj.Parent then return end
+                if obj:FindFirstChild("ESP_Added") then obj.ESP_Added:Destroy() end
+                if obj:FindFirstChild("ItemChams") then obj.ItemChams:Destroy() end
+                if obj:FindFirstChild("ItemNametag") then obj.ItemNametag:Destroy() end
+                Instance.new("BoolValue", obj).Name = "ESP_Added"
+                local fname = itemMap[obj.Name]
+                local icol = cols[fname] or Color3.fromRGB(255,165,0)
+
+                local hi = Instance.new("Highlight", obj)
+                hi.Name = "ItemChams"; hi.Adornee = obj; hi.FillColor = icol; hi.FillTransparency = 0.5
+                if obj.Name == "CollectablePiece" or obj.Name == "TrickOrTreatDoor_Origin" then
+                    hi.OutlineColor = Color3.fromRGB(255,255,255)
+                else
+                    hi.OutlineColor = icol
+                end
+                hi.OutlineTransparency = 0
+
+                local part = obj:IsA("Model") and (obj.PrimaryPart or obj:FindFirstChildWhichIsA("BasePart", true)) or (obj:IsA("BasePart") and obj)
+                if part then
+                    local bb = Instance.new("BillboardGui", obj)
+                    bb.Name = "ItemNametag"; bb.Adornee = part
+                    bb.Size = UDim2.new(0,200,0,50); bb.StudsOffset = Vector3.new(0,2.5,0)
+                    bb.AlwaysOnTop = true; bb.Enabled = not itemDisableNametags
+                    table.insert(activeItemNametags, bb)
+
+                    local txt = Instance.new("TextLabel", bb)
+                    txt.Size = UDim2.new(1,0,1,0); txt.BackgroundTransparency = 1
+                    txt.Text = fname; txt.TextColor3 = icol; txt.TextSize = 12
+                    txt.Font = Enum.Font.FredokaOne; txt.TextStrokeTransparency = 0
+                    if obj.Name == "TrickOrTreatDoor_Origin" then txt.TextStrokeColor3 = Color3.fromRGB(255,255,255)
+                    else txt.TextStrokeColor3 = Color3.fromRGB(0,0,0) end
+
+                    if obj.Name == "Pumpkin" or obj.Name == "HolidayCollectibleItem" then
+                        task.spawn(function()
+                            local orange, purple = Color3.fromRGB(255,140,0), Color3.fromRGB(148,0,211)
+                            while itemEspEnabled and obj and obj.Parent and hi and txt do
+                                local a = math.abs(((tick()/2)%2)-1)
+                                local c = purple:Lerp(orange, a)
+                                hi.FillColor = c; hi.OutlineColor = c; txt.TextColor3 = c
+                                task.wait(0.1)
+                            end
+                        end)
+                    elseif obj.Name == "Ornament" then
+                        task.spawn(function()
+                            local red, teal = Color3.fromRGB(255,0,0), Color3.fromRGB(0,200,200)
+                            while itemEspEnabled and obj and obj.Parent and hi and txt do
+                                local a = math.abs(((tick()/2)%2)-1)
+                                local c = red:Lerp(teal, a)
+                                hi.FillColor = c; hi.OutlineColor = c; txt.TextColor3 = c
+                                task.wait(0.1)
+                            end
+                        end)
+                    elseif obj.Name == "Basket" then
+                        task.spawn(function()
+                            local pink, py = Color3.fromRGB(255,105,180), Color3.fromRGB(255,255,180)
+                            while itemEspEnabled and obj and obj.Parent and hi and txt do
+                                local a = math.abs(((tick()/2)%2)-1)
+                                local c = pink:Lerp(py, a)
+                                hi.FillColor = c; hi.OutlineColor = c; txt.TextColor3 = c
+                                task.wait(0.1)
+                            end
+                        end)
+                    end
+                end
+            end
+
+            task.spawn(function()
+                while itemEspEnabled do
+                    for _, o in ipairs(workspace:GetDescendants()) do
+                        if itemMap[o.Name] then apply(o) end
+                    end
+                    task.wait(2)
+                end
+            end)
+        else
+            activeItemNametags = {}
+            for _, o in ipairs(workspace:GetDescendants()) do
+                if o:FindFirstChild("ESP_Added") then o.ESP_Added:Destroy() end
+                if o:FindFirstChild("ItemChams") then o.ItemChams:Destroy() end
+                if o:FindFirstChild("ItemNametag") then o.ItemNametag:Destroy() end
+            end
+        end
+    end
+})
+ItemEspGroup:AddToggle("ItemDisableNametagsToggle", {
+    Text = "Disable Item Esp Nametags", Default = false,
+    Callback = function(v)
+        itemDisableNametags = v
+        for _, tag in ipairs(activeItemNametags) do
+            if tag and tag.Parent then tag.Enabled = not itemDisableNametags end
+        end
+    end
+})
+
+-- ========== MACHINE ESP ==========
+local generatorEspEnabled = false
+local generatorConn = nil
+
+local MachineEspGroup = EspTab:AddRightGroupbox("Machine ESP")
+MachineEspGroup:AddToggle("GeneratorEspToggle", {
+    Text = "Machine Esp", Default = false,
+    Callback = function(v)
+        generatorEspEnabled = v
+        if generatorEspEnabled then
+            local ignoredNames = {
+                ["VendingMachine"]=true,["Cooking_ExpressoMachine"]=true,["DanceMachine"]=true,
+                ["Gachapon_Arcade_01"]=true,["Gachapon_Arcade_02"]=true,["Gachapon_Arcade_03"]=true
+            }
+            local function applyESP(model)
+                if not model or not model:IsA("Model") or ignoredNames[model.Name] then return end
+                local n = model.Name:lower()
+                local isMachine = n == "generator" or n == "generators" or n:find("generator") or n:find("dual_generator") or n:find("machine")
+                if not isMachine then return end
+                if model:FindFirstChild("CustomESP") then model.CustomESP:Destroy() end
+                local folder = Instance.new("Folder", model); folder.Name = "CustomESP"
+                local hl = Instance.new("Highlight")
+                hl.Name = "Chams"; hl.Adornee = model
+                hl.FillColor = Color3.fromRGB(255,255,255); hl.OutlineColor = Color3.fromRGB(255,255,255)
+                hl.FillTransparency = 0.5; hl.OutlineTransparency = 0
+                hl.Parent = folder
+                task.spawn(function()
+                    local w, sb = Color3.fromRGB(255,255,255), Color3.fromRGB(40,40,40)
+                    while generatorEspEnabled and model and model.Parent and hl and hl.Parent do
+                        local a = math.abs(((tick()/2)%2)-1)
+                        hl.FillColor = w:Lerp(sb, a)
+                        task.wait(0.1)
+                    end
+                end)
+            end
+            for _, obj in ipairs(workspace:GetDescendants()) do
+                if obj:IsA("Model") then applyESP(obj) end
+            end
+            if not generatorConn then
+                generatorConn = workspace.DescendantAdded:Connect(function(obj)
+                    if generatorEspEnabled and obj:IsA("Model") then task.wait(0.1); applyESP(obj) end
+                end)
+            end
+        else
+            if generatorConn then generatorConn:Disconnect(); generatorConn = nil end
+            for _, obj in ipairs(workspace:GetDescendants()) do
+                if obj:IsA("Model") then
+                    local c = obj:FindFirstChild("CustomESP")
+                    if c then c:Destroy() end
+                end
+            end
+        end
+    end
+})
+
+-- ========== ICHOR PUDDLES ESP ==========
+local ichorEspEnabled = false
+local ichorDisableNametags = false
+local activeIchorNametags = {}
+
+local IchorGroup = EspTab:AddLeftGroupbox("Ichor Puddles ESP")
+IchorGroup:AddToggle("IchorPuddlesEspToggle", {
+    Text = "Ichor Puddles Esp", Default = false,
+    Callback = function(v)
+        ichorEspEnabled = v
+        if ichorEspEnabled then
+            local function applyIchor(obj)
+                if obj:FindFirstChild("IchorESP") then return end
+                local n = obj.Name
+                if n == "Ichor_Puddle_01" or n == "Ichor_Puddle_02" or n == "Ichor_Puddle_03" or n == "FinnIchorPuddle" then
+                    local folder = Instance.new("Folder", obj); folder.Name = "IchorESP"
+                    local hl = Instance.new("Highlight", folder)
+                    hl.Adornee = obj; hl.FillColor = Color3.fromRGB(0,0,0); hl.FillTransparency = 0.5
+                    hl.OutlineColor = Color3.fromRGB(255,255,255); hl.OutlineTransparency = 0
+                    local part = obj:IsA("Model") and (obj.PrimaryPart or obj:FindFirstChildWhichIsA("BasePart", true)) or (obj:IsA("BasePart") and obj)
+                    if part then
+                        local bb = Instance.new("BillboardGui", folder)
+                        bb.Name = "Nametag"; bb.Adornee = part
+                        bb.Size = UDim2.new(0,200,0,50); bb.StudsOffset = Vector3.new(0,2.5,0)
+                        bb.AlwaysOnTop = true; bb.Enabled = not ichorDisableNametags
+                        table.insert(activeIchorNametags, bb)
+                        local displayName = n == "FinnIchorPuddle" and "Finn Ichor Puddle" or "Ichor Puddle"
+                        local txt = Instance.new("TextLabel", bb)
+                        txt.Size = UDim2.new(1,0,1,0); txt.BackgroundTransparency = 1
+                        txt.Text = displayName; txt.TextColor3 = Color3.fromRGB(0,0,0)
+                        txt.TextSize = 12; txt.Font = Enum.Font.FredokaOne
+                        txt.TextStrokeTransparency = 0; txt.TextStrokeColor3 = Color3.fromRGB(255,255,255)
+                    end
+                end
+            end
+            task.spawn(function()
+                while ichorEspEnabled do
+                    for _, obj in ipairs(workspace:GetDescendants()) do applyIchor(obj) end
+                    task.wait(2)
+                end
+            end)
+        else
+            activeIchorNametags = {}
+            for _, obj in ipairs(workspace:GetDescendants()) do
+                local c = obj:FindFirstChild("IchorESP")
+                if c then c:Destroy() end
+            end
+        end
+    end
+})
+IchorGroup:AddToggle("IchorDisableNametagsToggle", {
+    Text = "Disable Ichor Puddles Nametags", Default = false,
+    Callback = function(v)
+        ichorDisableNametags = v
+        for _, tag in ipairs(activeIchorNametags) do
+            if tag and tag.Parent then tag.Enabled = not ichorDisableNametags end
+        end
+    end
+})
+
+-- ========== ELEVATORS ESP ==========
+local elevatorEspEnabled = false
+local elevatorDisableNametags = false
+local activeElevatorNametags = {}
+
+local ElevatorGroup = EspTab:AddRightGroupbox("Elevators ESP")
+ElevatorGroup:AddToggle("ElevatorEspToggle", {
+    Text = "Elevator Esp", Default = false,
+    Callback = function(v)
+        elevatorEspEnabled = v
+        if elevatorEspEnabled then
+            local function applyElevator(obj)
+                if obj:FindFirstChild("ElevatorESP") then return end
+                if obj.Name == "ElevatorDoor" then
+                    local folder = Instance.new("Folder", obj); folder.Name = "ElevatorESP"
+                    local hl = Instance.new("Highlight", folder)
+                    hl.Adornee = obj; hl.FillColor = Color3.fromRGB(0,0,0); hl.FillTransparency = 0.5
+                    hl.OutlineColor = Color3.fromRGB(0,0,0); hl.OutlineTransparency = 0
+                    local part = obj:IsA("Model") and (obj.PrimaryPart or obj:FindFirstChildWhichIsA("BasePart", true)) or (obj:IsA("BasePart") and obj)
+                    if part then
+                        local bb = Instance.new("BillboardGui", folder)
+                        bb.Name = "Nametag"; bb.Adornee = part
+                        bb.Size = UDim2.new(0,200,0,50); bb.StudsOffset = Vector3.new(0,2.5,0)
+                        bb.AlwaysOnTop = true; bb.Enabled = not elevatorDisableNametags
+                        table.insert(activeElevatorNametags, bb)
+                        local txt = Instance.new("TextLabel", bb)
+                        txt.Size = UDim2.new(1,0,1,0); txt.BackgroundTransparency = 1
+                        txt.Text = "Elevator"; txt.TextColor3 = Color3.fromRGB(255,255,255)
+                        txt.TextSize = 12; txt.Font = Enum.Font.FredokaOne; txt.TextStrokeTransparency = 0
+                    end
+                end
+            end
+            task.spawn(function()
+                while elevatorEspEnabled do
+                    for _, obj in ipairs(workspace:GetDescendants()) do applyElevator(obj) end
+                    task.wait(2)
+                end
+            end)
+        else
+            activeElevatorNametags = {}
+            for _, obj in ipairs(workspace:GetDescendants()) do
+                local c = obj:FindFirstChild("ElevatorESP")
+                if c then c:Destroy() end
+            end
+        end
+    end
+})
+ElevatorGroup:AddToggle("ElevatorDisableNametagsToggle", {
+    Text = "Disable Elevator Esp Nametags", Default = false,
+    Callback = function(v)
+        elevatorDisableNametags = v
+        for _, tag in ipairs(activeElevatorNametags) do
+            if tag and tag.Parent then tag.Enabled = not elevatorDisableNametags end
+        end
+    end
+})
+
+local fakeElevatorEspEnabled = false
+local fakeElevatorDisableNametags = false
+local activeFakeElevatorNametags = {}
+
+ElevatorGroup:AddToggle("FakeElevatorEspToggle", {
+    Text = "Fake Elevator Esp", Default = false,
+    Callback = function(v)
+        fakeElevatorEspEnabled = v
+        if fakeElevatorEspEnabled then
+            local function applyFE(obj)
+                if obj:FindFirstChild("FakeElevatorESP") then return end
+                if obj.Name:lower():find("fakeelevator") or obj.Name:lower():find("fake_elevator") then
+                    local folder = Instance.new("Folder", obj); folder.Name = "FakeElevatorESP"
+                    local hl = Instance.new("Highlight", folder)
+                    hl.Adornee = obj; hl.FillColor = Color3.fromRGB(255,255,150); hl.FillTransparency = 0.7
+                    hl.OutlineColor = Color3.fromRGB(255,255,150); hl.OutlineTransparency = 0.5
+                    local part = obj:IsA("Model") and (obj.PrimaryPart or obj:FindFirstChildWhichIsA("BasePart", true)) or (obj:IsA("BasePart") and obj)
+                    if part then
+                        local bb = Instance.new("BillboardGui", folder)
+                        bb.Name = "Nametag"; bb.Adornee = part
+                        bb.Size = UDim2.new(0,200,0,50); bb.StudsOffset = Vector3.new(0,2.5,0)
+                        bb.AlwaysOnTop = true; bb.Enabled = not fakeElevatorDisableNametags
+                        table.insert(activeFakeElevatorNametags, bb)
+                        local txt = Instance.new("TextLabel", bb)
+                        txt.Size = UDim2.new(1,0,1,0); txt.BackgroundTransparency = 1
+                        txt.Text = "Fake Elevator"; txt.TextColor3 = Color3.fromRGB(255,255,150)
+                        txt.TextSize = 12; txt.Font = Enum.Font.FredokaOne; txt.TextStrokeTransparency = 0
+                    end
+                end
+            end
+            task.spawn(function()
+                while fakeElevatorEspEnabled do
+                    for _, obj in ipairs(workspace:GetDescendants()) do applyFE(obj) end
+                    task.wait(2)
+                end
+            end)
+        else
+            activeFakeElevatorNametags = {}
+            for _, obj in ipairs(workspace:GetDescendants()) do
+                local c = obj:FindFirstChild("FakeElevatorESP")
+                if c then c:Destroy() end
+            end
+        end
+    end
+})
+ElevatorGroup:AddToggle("FakeElevatorDisableNametagsToggle", {
+    Text = "Disable Fake Elevator Nametags", Default = false,
+    Callback = function(v)
+        fakeElevatorDisableNametags = v
+        for _, tag in ipairs(activeFakeElevatorNametags) do
+            if tag and tag.Parent then tag.Enabled = not fakeElevatorDisableNametags end
+        end
+    end
+})
+
+-- ==============================================================================
+-- PART 2 AUTO-LOAD (2 seconds later)
+-- ==============================================================================
+task.delay(2, function()
+    print("[IMS/Shrimpo's GUI] Loading Part 2...")
+
+    -- ========== TELEPORT TAB ==========
+    local TeleportTab = Window:AddTab({ Name = "Teleport", Icon = "map-pin", Description = "Teleport shortcuts" })
+    local TpGroup = TeleportTab:AddLeftGroupbox("Destinations")
+    TpGroup:AddButton({ Text = "Teleport To Elevator", Func = function() teleportTo("elevator", false) end })
+    TpGroup:AddButton({ Text = "Teleport To Machine", Func = function()
+        if not Shared.Character or not Shared.HumanoidRootPart then return end
+        local ignoredNames = { ["VendingMachine"]=true,["Cooking_ExpressoMachine"]=true,["DanceMachine"]=true,["Gachapon_Arcade_01"]=true,["Gachapon_Arcade_02"]=true,["Gachapon_Arcade_03"]=true }
+        local gens = {}
+        for _, obj in ipairs(workspace:GetDescendants()) do
+            if not ignoredNames[obj.Name] then
+                local n = obj.Name:lower()
+                if n == "generator" or n == "generators" or n:find("generator") or n:find("dual_generator") then
+                    local part = obj:IsA("Model") and (obj.PrimaryPart or obj:FindFirstChildWhichIsA("BasePart", true)) or (obj:IsA("BasePart") and obj)
+                    if part then table.insert(gens, part) end
+                end
+            end
+        end
+        if #gens > 0 then
+            local g = gens[math.random(1, #gens)]
+            Shared.HumanoidRootPart.CFrame = g.CFrame + Vector3.new(0, 3, 0)
+        end
+    end })
+
+    local itemsList = {"AirHorn","SmokeBomb","ResearchCapsule","ProteinBar","Jawbreaker","EjectButton","HealthKit","Bandage","Tape","Instructions","ExtractionSpeedCandy","SkillCheckCandy","StaminaCandy","StealthCandy","SpeedCandy","Gumball","BonBon","Chocolate","ChocolateBox","Pop","PopBottle","JumperCable","Stopwatch","ChristmasCookie","DandyEasterEggs","Pumpkin","FakeCapsule"}
+    local selectedItem = itemsList[1]
+
+    local ItemTpGroup = TeleportTab:AddRightGroupbox("Items Teleport")
+    ItemTpGroup:AddDropdown("SelectedItemTp", {
+        Text = "Select Your Item", Values = itemsList, Default = itemsList[1],
+        Callback = function(opt) selectedItem = opt end
+    })
+    ItemTpGroup:AddButton({ Text = "Teleport to Selected Item", Func = function() teleportTo(selectedItem, true) end })
+
+    -- ========== PLAYER TAB ==========
+    local PlayerTab = Window:AddTab({ Name = "Player", Icon = "user", Description = "Player utilities" })
+    local PlayerGroup = PlayerTab:AddLeftGroupbox("Character")
+
+    -- HIPHEIGHT (0 to 16)
+    local currentHipHeight = 2
+    PlayerGroup:AddSlider("HipHeightSlider", {
+        Text = "Hipheight", Default = 2, Min = 0, Max = 16, Rounding = 0,
+        Callback = function(v)
+            currentHipHeight = v
+            if Shared.Humanoid then Shared.Humanoid.HipHeight = v end
+        end
+    })
+    LocalPlayer.CharacterAdded:Connect(function(char)
+        task.delay(0.5, function()
+            local h = char:FindFirstChildOfClass("Humanoid")
+            if h then h.HipHeight = currentHipHeight end
+        end)
+    end)
+
+    local noSlipperyEnabled = false
+    local defaultPhysicalProperties = {}
+    local brakeConnection = nil
+
+    PlayerGroup:AddToggle("NoSlipperyToggle", {
+        Text = "No Slippery", Default = false,
+        Callback = function(v)
+            noSlipperyEnabled = v
+            local char = LocalPlayer.Character
+            if noSlipperyEnabled then
+                local props = PhysicalProperties.new(15.0, 3.0, 0.0, 1.0, 1.0)
+                if char then
+                    for _, part in ipairs(char:GetDescendants()) do
+                        if part:IsA("BasePart") then
+                            if not defaultPhysicalProperties[part] then defaultPhysicalProperties[part] = part.CustomPhysicalProperties end
+                            part.CustomPhysicalProperties = props
+                        end
+                    end
+                end
+                if not brakeConnection then
+                    brakeConnection = RunService.RenderStepped:Connect(function(dt)
+                        if not noSlipperyEnabled then return end
+                        local c = LocalPlayer.Character
+                        if not c then return end
+                        local h = c:FindFirstChildOfClass("Humanoid")
+                        local r = c:FindFirstChild("HumanoidRootPart")
+                        if h and r and h.Health > 0 then
+                            local vel = r.AssemblyLinearVelocity
+                            local hv = Vector3.new(vel.X, 0, vel.Z)
+                            if h.MoveDirection.Magnitude == 0 and hv.Magnitude > 0.5 then
+                                local bf = math.clamp(dt * 25, 0, 1)
+                                r.AssemblyLinearVelocity = Vector3.new(vel.X*(1-bf), vel.Y, vel.Z*(1-bf))
+                            end
+                        end
+                    end)
+                end
+            else
+                if brakeConnection then brakeConnection:Disconnect(); brakeConnection = nil end
+                if char then
+                    for _, part in ipairs(char:GetDescendants()) do
+                        if part:IsA("BasePart") then
+                            part.CustomPhysicalProperties = defaultPhysicalProperties[part] or nil
+                        end
+                    end
+                end
+                defaultPhysicalProperties = {}
+            end
+        end
+    })
+
+    LocalPlayer.CharacterAdded:Connect(function(char)
+        if noSlipperyEnabled then
+            task.delay(1, function()
+                if noSlipperyEnabled and char then
+                    local props = PhysicalProperties.new(15.0, 3.0, 0.0, 1.0, 1.0)
+                    for _, part in ipairs(char:GetDescendants()) do
+                        if part:IsA("BasePart") then part.CustomPhysicalProperties = props end
+                    end
+                end
+            end)
+        end
+    end)
+
+    local itemAuraEnabled = false
+    PlayerGroup:AddToggle("ItemAuraToggle", {
+        Text = "Item Aura", Default = false,
+        Callback = function(v) itemAuraEnabled = v end
+    })
+    task.spawn(function()
+        while true do
+            if itemAuraEnabled then
+                pcall(function()
+                    for _, obj in ipairs(workspace:GetDescendants()) do
+                        if obj:IsA("ProximityPrompt") then
+                            local pp = obj.Parent
+                            if pp and pp:IsA("BasePart") and Shared.HumanoidRootPart then
+                                if (pp.Position - Shared.HumanoidRootPart.Position).Magnitude <= (obj.MaxActivationDistance or 15) then
+                                    fireproximityprompt(obj)
+                                end
+                            end
+                        end
+                    end
+                end)
+            end
+            task.wait(0.3)
+        end
+    end)
+
+    local PlayerToolsGroup = PlayerTab:AddRightGroupbox("Tools")
+    PlayerToolsGroup:AddButton({
+        Text = "Anti Lag",
+        Func = function()
+            pcall(function()
+                Lighting.GlobalShadows = false
+                Lighting.FogEnd = 9e9
+                for _, v in pairs(Lighting:GetChildren()) do
+                    if v:IsA("PostEffect") or v:IsA("BlurEffect") or v:IsA("SunRaysEffect") or v:IsA("ColorCorrectionEffect") or v:IsA("BloomEffect") then
+                        v.Enabled = false
+                    end
+                end
+                local function optimizeObject(object)
+                    if object:IsA("ParticleEmitter") or object:IsA("Trail") or object:IsA("Smoke") or object:IsA("Fire") or object:IsA("Sparkles") then
+                        object.Enabled = false
+                    elseif object:IsA("Light") then
+                        object.Enabled = false
+                    elseif object:IsA("BasePart") then
+                        object.Material = Enum.Material.SmoothPlastic
+                        object.Reflectance = 0
+                        object.CastShadow = false
+                        if object.Parent and object.Parent:FindFirstChildOfClass("Humanoid") then
+                            if object.Parent.Humanoid.Health <= 0 then object.CanCollide = false end
+                        end
+                    elseif object:IsA("Decal") or object:IsA("Texture") then
+                        object.Transparency = 1
+                    end
+                end
+                for _, d in pairs(Workspace:GetDescendants()) do optimizeObject(d) end
+                Workspace.DescendantAdded:Connect(function(d)
+                    task.wait()
+                    optimizeObject(d)
+                end)
+            end)
+        end
+    })
+
+    PlayerToolsGroup:AddButton({
+        Text = "Infinite Stamina",
+        Func = function()
+            pcall(function()
+                loadstring(game:HttpGet("https://raw.githubusercontent.com/abelsrighthand/AbstractLite/refs/heads/main/abstractlite(infstam).lua"))()
+            end)
+        end
+    })
+
+    PlayerToolsGroup:AddButton({
+        Text = "Ability Infinite Range",
+        Func = function()
+            pcall(function()
+                local toons = {"Shelly","Sprout","Cosmo","Scraps","Glisten"}
+                local toonsTable = {}
+                for _, t in pairs(toons) do toonsTable[t] = true end
+                for _, conn in pairs(getconnections(RunService.RenderStepped)) do
+                    local func = conn.Function
+                    if func then
+                        local ok, upvals = pcall(getupvalues, func)
+                        if ok and upvals then
+                            for _, val in pairs(upvals) do
+                                if typeof(val) == "table" then
+                                    local ok2, name = pcall(function() return val.Name end)
+                                    local ok3, radius = pcall(function() return val.PlayerRadius end)
+                                    if ok2 and ok3 and toonsTable[name] and radius and radius ~= 500 then
+                                        val.PlayerRadius = 500
+                                    end
+                                end
+                            end
+                        end
+                    end
+                end
+            end)
+        end
+    })
+
+    -- ========== MACHINE TAB ==========
+    local MachineTab = Window:AddTab({ Name = "Machine", Icon = "cog", Description = "Machine & minigame helpers" })
+    local MachineGroup = MachineTab:AddLeftGroupbox("Machines")
+
+    MachineGroup:AddToggle("InstantSkillcheck", {
+        Text = "Instant Skillcheck", Default = false,
+        Callback = function(v) getgenv().scinstant = v end
+    })
+
+    local instantStashGigiEnabled = false
+    local originalHoldDurations = {}
+    MachineGroup:AddToggle("InstantStashGigiPrompt", {
+        Text = "Instant Stash Gigi Machine Prompt", Default = false,
+        Callback = function(v)
+            instantStashGigiEnabled = v
+            if instantStashGigiEnabled then
+                task.spawn(function()
+                    while instantStashGigiEnabled do
+                        for _, obj in ipairs(workspace:GetDescendants()) do
+                            if obj:IsA("ProximityPrompt") then
+                                if not originalHoldDurations[obj] then originalHoldDurations[obj] = obj.HoldDuration end
+                                obj.HoldDuration = 0
+                            end
+                        end
+                        task.wait(1.5)
+                    end
+                end)
+            else
+                for p, dur in pairs(originalHoldDurations) do
+                    if p and p.Parent then p.HoldDuration = dur end
+                end
+                originalHoldDurations = {}
+            end
+        end
+    })
+
+    MachineGroup:AddButton({ Text = "Auto Arcade Machine", Func = function()
+        pcall(function() loadstring(game:HttpGet("https://raw.githubusercontent.com/christmas-cookie/extensions/refs/heads/main/arcademachine", true))() end)
+    end })
+
+    local ArcadeGroup = MachineTab:AddRightGroupbox("Arcade Games")
+    local autoSwimmyEnabled = false
+    ArcadeGroup:AddToggle("AutoSwimmyToggle", {
+        Text = "Auto Swimmy Barnaby Machine (LOBBY)", Default = false,
+        Callback = function(v) autoSwimmyEnabled = v end
+    })
+
+    task.spawn(function()
+        pcall(function()
+            local barnabymodule = require(ReplicatedStorage.SharedData.ArcadeGames.SwimmyBarnaby)
+            local pg = LocalPlayer:WaitForChild("PlayerGui")
+
+            local function barnabify(session)
+                if not autoSwimmyEnabled then return end
+                session.forcekill = false
+                if type(session.tick) == "function" or (getmetatable(session) and session.tick) then
+                    local oldtick = session.tick
+                    session.tick = function(self, ...)
+                        if not autoSwimmyEnabled then return oldtick(self, ...) end
+                        if self.forcekill then return -1 end
+                        local result = oldtick(self, ...)
+                        if result == -1 then return 0 end
+                        return result
+                    end
+                end
+                if type(session.Jump) == "function" then session.Jump = function() end end
+                if session.Fish and type(session.Fish.Jump) == "function" then session.Fish.Jump = function() end end
+                pcall(function()
+                    local uisrc = ReplicatedStorage.SharedData.ArcadeGames.SwimmyBarnaby.ClientUI
+                    local customui = uisrc:Clone()
+                    customui.Name = "end me"
+                    if customui:IsA("ScreenGui") then customui.DisplayOrder = 999999999 end
+                    customui.Parent = pg
+                    local bottom = customui.Bottom
+                    local mobile = bottom.Mobile
+                    local unpressed = mobile.Unpressed
+                    local textlabel = unpressed.TextLabel
+                    textlabel.Text = "END GAME"
+                    bottom.Visible = true; bottom.Hint.Visible = false
+                    bottom.ZIndex = 9e9; mobile.ZIndex = 9e9
+                    unpressed.ZIndex = 9e9; textlabel.ZIndex = 9e9
+                    mobile.Activated:Connect(function()
+                        session.forcekill = true
+                        customui:Destroy()
+                    end)
+                end)
+                if session.Fish then
+                    pcall(function() session.Fish:SetGravity(0) end)
+                    if session.Fish.Part then
+                        task.spawn(function()
+                            while session.SessionId and not session.forcekill and autoSwimmyEnabled do
+                                pcall(function()
+                                    local cf = session.Fish.Part:GetPivot()
+                                    session.Fish.Part:PivotTo(CFrame.new(cf.X, 0, cf.Z))
+                                end)
+                                task.wait()
+                            end
+                        end)
+                    end
+                end
+                task.spawn(function()
+                    while session.SessionId and not session.forcekill and autoSwimmyEnabled do
+                        pcall(function()
+                            if session.Parent then
+                                for _, child in ipairs(session.Parent:GetChildren()) do
+                                    if child:IsA("Model") and (child.Name:find("Obstacle") or child:FindFirstChild("BendySeaweed")) then
+                                        for _, d in ipairs(child:GetDescendants()) do
+                                            if d:IsA("BasePart") then
+                                                d.CanCollide = false; d.CanTouch = false; d:Destroy()
+                                            end
+                                        end
+                                    end
+                                end
+                            end
+                        end)
+                        task.wait(0.2)
+                    end
+                end)
+            end
+
+            local oldstart = barnabymodule.Start
+            barnabymodule.Start = function(self, creators)
+                if autoSwimmyEnabled and creators and creators.Obstacle then
+                    local oldvein = creators.Obstacle
+                    creators.Obstacle = function(...)
+                        local vein = oldvein(...)
+                        if vein and vein.Model then
+                            pcall(function()
+                                for _, part in ipairs(vein.Model:GetDescendants()) do
+                                    if part:IsA("BasePart") then
+                                        part.CanCollide = false; part.CanTouch = false
+                                    end
+                                end
+                            end)
+                        end
+                        return vein
+                    end
+                end
+                local res = oldstart(self, creators)
+                if autoSwimmyEnabled then barnabify(self) end
+                return res
+            end
+
+            task.spawn(function()
+                while true do
+                    if autoSwimmyEnabled then
+                        for _, v in ipairs(getgc(true)) do
+                            if type(v) == "table" and rawget(v, "GAME_CONFIG") and rawget(v, "SessionId") then
+                                barnabify(v)
+                            end
+                        end
+                    end
+                    task.wait(2)
+                end
+            end)
+        end)
+    end)
+
+    task.spawn(function()
+        getgenv().scinstant = false
+        pcall(function()
+            local event = ReplicatedStorage:WaitForChild("Events"):WaitForChild("SkillcheckUpdate")
+            local ogcb = getcallbackvalue(event, "OnClientInvoke")
+            if ogcb then
+                local hook
+                hook = hookfunction(ogcb, function(...)
+                    if getgenv().scinstant then return "supercomplete" end
+                    return hook(...)
+                end)
+                print("Instant Skillcheck ativado!")
+            else
+                warn("Não foi possível encontrar o callback do Skillcheck.")
+            end
+        end)
+    end)
+
+    -- ========== MAP TAB ==========
+    local MapTab = Window:AddTab({ Name = "Map", Icon = "map", Description = "Map & lighting" })
+    local LightGroup = MapTab:AddLeftGroupbox("Lighting")
+
+    local altFbConn = nil
+    LightGroup:AddToggle("AltFullbrightToggle", {
+        Text = "Alternative Fullbright", Default = false,
+        Callback = function(v)
+            if v then
+                local function setFb()
+                    Lighting.Brightness, Lighting.GlobalShadows, Lighting.OutdoorAmbient, Lighting.Ambient, Lighting.ClockTime, Lighting.FogEnd, Lighting.FogStart = 2, true, Color3.fromRGB(120,120,120), Color3.fromRGB(100,100,100), 14, 100000, 0
+                end
+                setFb()
+                altFbConn = Lighting.Changed:Connect(setFb)
+            else
+                if altFbConn then altFbConn:Disconnect(); altFbConn = nil end
+                Lighting.Brightness = 1; Lighting.GlobalShadows = true
+                Lighting.OutdoorAmbient = Color3.fromRGB(127,127,127)
+                Lighting.Ambient = Color3.fromRGB(0,0,0)
+                Lighting.ClockTime = 12; Lighting.FogEnd = 10000
+            end
+        end
+    })
+
+    local fbConn = nil
+    LightGroup:AddToggle("FullbrightToggle", {
+        Text = "Fullbright", Default = false,
+        Callback = function(v)
+            if v then
+                local function cfb()
+                    Lighting.Brightness = 3; Lighting.ClockTime = 14
+                    Lighting.FogEnd = 999999; Lighting.FogStart = 0
+                    Lighting.GlobalShadows = false
+                    Lighting.OutdoorAmbient = Color3.fromRGB(255,255,255)
+                    Lighting.Ambient = Color3.fromRGB(255,255,255)
+                end
+                cfb(); fbConn = RunService.RenderStepped:Connect(cfb)
+            else
+                if fbConn then fbConn:Disconnect(); fbConn = nil end
+                Lighting.Brightness = 1; Lighting.ClockTime = 12
+                Lighting.FogEnd = 10000; Lighting.FogStart = 0
+                Lighting.GlobalShadows = true
+                Lighting.OutdoorAmbient = Color3.fromRGB(127,127,127)
+                Lighting.Ambient = Color3.fromRGB(0,0,0)
+            end
+        end
+    })
+
+    -- ========== FUN TAB ==========
+    local FunTab = Window:AddTab({ Name = "Fun", Icon = "smile", Description = "For fun" })
+
+    local spinning = false
+    local spinSpeed = 25
+    local spinConnection = nil
+    local FunGroup = FunTab:AddLeftGroupbox("Character")
+
+    FunGroup:AddToggle("SpinToggle", {
+        Text = "Spin", Default = false,
+        Callback = function(v)
+            spinning = v
+            if spinning then
+                spinConnection = RunService.RenderStepped:Connect(function()
+                    if Shared.HumanoidRootPart then
+                        Shared.HumanoidRootPart.CFrame = Shared.HumanoidRootPart.CFrame * CFrame.Angles(0, math.rad(spinSpeed), 0)
+                    end
+                end)
+            else
+                if spinConnection then spinConnection:Disconnect(); spinConnection = nil end
+            end
+        end
+    })
+    FunGroup:AddSlider("SpinSpeedFlag", {
+        Text = "Spin Speed", Default = 25, Min = 1, Max = 100, Rounding = 0,
+        Callback = function(v) spinSpeed = v end
+    })
+
+    FunGroup:AddButton({
+        Text = "HardCore Mode",
+        Func = function()
+            pcall(function()
+                Lighting.FogColor = Color3.fromRGB(0,0,0)
+                Lighting.FogStart = 0; Lighting.FogEnd = 50
+                Lighting.Brightness = 0
+                pcall(function()
+                    for _, s in ipairs(workspace:GetDescendants()) do
+                        if s:IsA("Sound") then s.Volume = 0 end
+                    end
+                    game:GetService("SoundService").Volume = 0
+                end)
+                task.spawn(function()
+                    while true do
+                        pcall(function()
+                            local cr = Workspace:FindFirstChild("CurrentRoom")
+                            if cr then
+                                local mf = cr:FindFirstChild("Monsters")
+                                if mf then mf:ClearAllChildren() end
+                            end
+                            if LocalPlayer.Character and LocalPlayer.Character:FindFirstChildOfClass("Humanoid") then
+                                local h = LocalPlayer.Character:FindFirstChildOfClass("Humanoid")
+                                h.WalkSpeed = 22; Shared.speedValue = 22
+                            end
+                        end)
+                        task.wait(0.1)
+                    end
+                end)
+                Library:Notify({ Title = "Good Luck. :)", Description = "", Time = 2 })
+            end)
+        end
+    })
+
+    FunGroup:AddButton({
+        Text = "Kill Yourself",
+        Func = function()
+            pcall(function()
+                if LocalPlayer.Character and LocalPlayer.Character:FindFirstChildOfClass("Humanoid") then
+                    LocalPlayer.Character.Humanoid.Health = 0
+                end
+            end)
+        end
+    })
+
+    FunGroup:AddButton({
+        Text = "YouTube Music",
+        Func = function()
+            pcall(function()
+                loadstring(game:HttpGet("https://rawscripts.net/raw/Universal-Script-YouTube-Music-Player-V8-236600"))()
+            end)
+        end
+    })
+
+    local fovEnabled = false
+    local fovValue = 70
+    local fovConnection = nil
+    local CamGroup = FunTab:AddRightGroupbox("Camera & Jump")
+
+    CamGroup:AddToggle("FovToggle", {
+        Text = "FOV Changer", Default = false,
+        Callback = function(v)
+            fovEnabled = v
+            if fovEnabled then
+                fovConnection = RunService.RenderStepped:Connect(function()
+                    if Camera then Camera.FieldOfView = fovValue end
+                end)
+            else
+                if fovConnection then fovConnection:Disconnect(); fovConnection = nil end
+                if Camera then Camera.FieldOfView = 70 end
+            end
+        end
+    })
+    CamGroup:AddSlider("FovSlider", {
+        Text = "FOV Value", Default = 70, Min = 10, Max = 120, Rounding = 0,
+        Callback = function(v)
+            fovValue = v
+            if fovEnabled and Camera then Camera.FieldOfView = fovValue end
+        end
+    })
+
+    local jumpEnabled = false
+    local jumpPowerVal = 50
+    local jumpConnection = nil
+    CamGroup:AddToggle("EnableJumpToggle", {
+        Text = "Enable Jump", Default = false,
+        Callback = function(v)
+            jumpEnabled = v
+            if jumpEnabled then
+                jumpConnection = RunService.RenderStepped:Connect(function()
+                    if Shared.Humanoid then
+                        Shared.Humanoid.UseJumpPower = true
+                        Shared.Humanoid.JumpPower = jumpPowerVal
+                        pcall(function() LocalPlayer.Character:SetAttribute("CanJump", true) end)
+                    end
+                    pcall(function()
+                        local tg = LocalPlayer.PlayerGui:FindFirstChild("TouchGui")
+                        if tg then
+                            local tcf = tg:FindFirstChild("TouchControlFrame")
+                            if tcf then
+                                local jb = tcf:FindFirstChild("JumpButton")
+                                if jb then jb.Visible = true; jb.Active = true end
+                            end
+                        end
+                    end)
+                end)
+            else
+                if jumpConnection then jumpConnection:Disconnect(); jumpConnection = nil end
+                pcall(function()
+                    local tg = LocalPlayer.PlayerGui:FindFirstChild("TouchGui")
+                    if tg then
+                        local tcf = tg:FindFirstChild("TouchControlFrame")
+                        if tcf then
+                            local jb = tcf:FindFirstChild("JumpButton")
+                            if jb then jb.Visible = false; jb.Active = false end
+                        end
+                    end
+                end)
+            end
+        end
+    })
+    CamGroup:AddSlider("JumpPowerSlider", {
+        Text = "Jump Power", Default = 50, Min = 10, Max = 250, Rounding = 0,
+        Callback = function(v)
+            jumpPowerVal = v
+            if jumpEnabled and Shared.Humanoid then
+                Shared.Humanoid.UseJumpPower = true
+                Shared.Humanoid.JumpPower = jumpPowerVal
+            end
+        end
+    })
+
+    UserInputService.JumpRequest:Connect(function()
+        if jumpEnabled and Shared.Humanoid then
+            Shared.Humanoid:ChangeState(Enum.HumanoidStateType.Jumping)
+        end
+    end)
+
+    Library:Notify({ Title = "✅ Part 2 Loaded", Description = "All tabs are now available!", Time = 5 })
+    print("[IMS/Shrimpo's GUI] Part 2 loaded. All tabs unlocked.")
+end)
+
+-- Part 1 loaded notification
+Library:Notify({
+    Title = "✅ Part 1 Loaded",
+    Description = "Part 2 will auto-load in 2 seconds...",
+    Time = 3
+})
+print("[IMS/Shrimpo's GUI] Part 1 loaded. Part 2 loading in 2 seconds...")
